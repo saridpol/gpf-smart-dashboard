@@ -1,0 +1,11 @@
+{
+  "date": "6/10/2569",
+  "nav": {
+    "shariah": 12.3244,
+    "agg35": 37.0504,
+    "agg65": 46.315,
+    "foreign": 40.6887
+  },
+  "source": "https://www.gpf.or.th/thai2019/about/main.php?lang=th&menu=statistic&page=memberfund&pattern=n&size=n",
+  "note": "Starter data only; run Update GPF NAV workflow to attempt refresh."
+}

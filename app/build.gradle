@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'th.gpf.smartdashboard'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'th.gpf.smartdashboard'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+}

@@ -3,29 +3,57 @@ name: Update GPF NAV
 on:
   workflow_dispatch:
   schedule:
+    # 20:30 Thailand time, Monday-Friday (13:30 UTC)
     - cron: "30 13 * * 1-5"
 
 permissions:
   contents: write
 
+# Prevent two NAV jobs from trying to push at the same time.
+concurrency:
+  group: update-gpf-nav
+  cancel-in-progress: false
+
 jobs:
   update-nav:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Fetch official GPF NAV
         run: python scripts/fetch_gpf_nav.py
-      - name: Commit updated NAV data
+
+      - name: Commit updated NAV data safely
+        shell: bash
         run: |
+          set -euo pipefail
+
           if git diff --quiet -- nav-data.json; then
             echo "NAV unchanged; no commit needed."
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add nav-data.json
           git commit -m "Update official GPF NAV data"
-          git push
+
+          # Rebase the new NAV commit on the latest remote main branch.
+          # If nav-data.json changed remotely too, stop rather than overwrite it.
+          git fetch origin main
+          if ! git rebase origin/main; then
+            echo "::error::Rebase failed or conflict detected. No force-push was attempted."
+            git rebase --abort || true
+            exit 1
+          fi
+
+          git push origin HEAD:main

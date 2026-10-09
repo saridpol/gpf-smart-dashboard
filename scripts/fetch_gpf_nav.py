@@ -19,9 +19,9 @@ class TextParser(HTMLParser):
         self.parts = []
 
     def handle_data(self, data):
-        data = " ".join((data or "").split())
-        if data:
-            self.parts.append(data)
+        value = " ".join((data or "").split())
+        if value:
+            self.parts.append(value)
 
 
 def parse_be_date(value):
@@ -31,111 +31,134 @@ def parse_be_date(value):
     return date(year - 543, month, day)
 
 
-def get_existing_data():
+def read_existing():
     try:
-        return json.loads(OUTPUT.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(OUTPUT.read_text(encoding="utf-8"))
+        nav = data.get("nav", {})
+        required = ("shariah", "agg35", "agg65", "foreign")
+        if not all(k in nav and isinstance(nav[k], (int, float)) and nav[k] > 0 for k in required):
+            return None
+        return data
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
         return None
 
 
-def main():
-    request = urllib.request.Request(
-        URL,
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; GPF-NAV-Tracker/1.0)",
-            "Accept-Language": "th-TH,th;q=0.9,en;q=0.8",
-        },
+def preserve_latest(reason):
+    existing = read_existing()
+    if existing is None:
+        raise SystemExit(
+            f"{reason} No valid existing nav-data.json fallback is available."
+        )
+
+    # Preserve date and NAV values exactly; only annotate the freshness/status.
+    existing["verified"] = False
+    existing["status"] = "fallback_latest_available"
+    existing["status_message"] = (
+        "ดึง NAV ล่าสุดจากเว็บไซต์ไม่สำเร็จ ใช้ข้อมูลล่าสุดที่บันทึกไว้ "
+        "โปรดตรวจสอบวันที่ข้อมูลก่อนนำไปตัดสินใจ"
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        html = response.read().decode("utf-8", "replace")
-
-    parser = TextParser()
-    parser.feed(html)
-    text = " | ".join(parser.parts)
-    text = re.sub(r"\s+", " ", text)
-
-    # GPF's table can place separators between the date label and its value.
-    date_matches = list(
-        re.finditer(r"วันที่ประกาศใช้\D{0,80}?(\d{2}/\d{2}/\d{4})", text)
-    )
-    if not date_matches:
-        raise SystemExit(
-            "Could not find a published NAV date in the official page. "
-            "Existing nav-data.json was not changed."
-        )
-
-    patterns = {
-        "shariah": r"แผนการลงทุนตามหลักชะรีอะฮ์\D{0,40}?([0-9]+\.[0-9]{4})",
-        "agg35": r"แผนเชิงรุก\s*35\D{0,40}?([0-9]+\.[0-9]{4})",
-        "agg65": r"แผนเชิงรุก\s*65\D{0,40}?([0-9]+\.[0-9]{4})",
-        "foreign": r"แผนหุ้นต่างประเทศ\D{0,40}?([0-9]+\.[0-9]{4})",
-    }
-
-    candidates = []
-    for index, match in enumerate(date_matches):
-        try:
-            nav_date = parse_be_date(match.group(1))
-        except ValueError:
-            continue
-
-        # Restrict parsing to this date's section, not the rest of the page.
-        section_end = (
-            date_matches[index + 1].start()
-            if index + 1 < len(date_matches)
-            else min(len(text), match.end() + 6000)
-        )
-        section = text[match.end():section_end]
-
-        nav = {}
-        for key, pattern in patterns.items():
-            value_match = re.search(pattern, section)
-            if not value_match:
-                break
-            nav[key] = float(value_match.group(1))
-
-        if len(nav) == 4 and all(v > 0 for v in nav.values()):
-            candidates.append((nav_date, match.group(1), nav))
-
-    if not candidates:
-        raise SystemExit(
-            "Found a date but could not validate all four NAV values "
-            "in the same official-page section. Existing data was not changed."
-        )
-
-    # Choose the newest date only among sections with all four validated NAVs.
-    nav_date, date_text, nav = max(candidates, key=lambda item: item[0])
-    today = datetime.now().date()
-    age_days = (today - nav_date).days
-    if age_days < 0:
-        raise SystemExit(
-            f"Official NAV date {date_text} is in the future. "
-            "Existing data was not changed."
-        )
-    if age_days > MAX_AGE_DAYS:
-        raise SystemExit(
-            f"Official page returned NAV dated {date_text} "
-            f"({age_days} days old; limit {MAX_AGE_DAYS}). "
-            "This may be stale cached content; existing data was not changed."
-        )
-
-    data = {
-        "date": f"{nav_date.day}/{nav_date.month}/{nav_date.year + 543}",
-        "nav_date_iso": nav_date.isoformat(),
-        "nav": nav,
-        "source": URL,
-        "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "verified": True,
-        "status": "official_page_parsed",
-        "note": "NAV date is the publication date shown by the official GPF page.",
-    }
-
-    # Write only after date and all four NAV values pass validation.
+    existing["last_fetch_attempt"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    existing["fetch_error"] = reason[:500]
     OUTPUT.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(existing, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    print("Validated official GPF NAV data:")
-    print(json.dumps(data, ensure_ascii=False, indent=2))
+    print("WARNING: Using last available NAV; values and publication date were preserved.")
+    print(json.dumps({
+        "date": existing.get("date"),
+        "nav_date_iso": existing.get("nav_date_iso"),
+        "nav": existing.get("nav"),
+        "status": existing["status"],
+        "fetch_error": existing["fetch_error"],
+    }, ensure_ascii=False, indent=2))
+
+
+def main():
+    try:
+        request = urllib.request.Request(
+            URL,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; GPF-NAV-Tracker/1.0)",
+                "Accept-Language": "th-TH,th;q=0.9,en;q=0.8",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            html = response.read().decode("utf-8", "replace")
+
+        parser = TextParser()
+        parser.feed(html)
+        text = re.sub(r"\s+", " ", " | ".join(parser.parts))
+
+        date_matches = list(
+            re.finditer(r"วันที่ประกาศใช้\D{0,100}?(\d{2}/\d{2}/\d{4})", text)
+        )
+        if not date_matches:
+            preserve_latest("Could not locate an official NAV date on the page.")
+            return
+
+        patterns = {
+            "shariah": r"แผนการลงทุนตามหลักชะรีอะฮ์\D{0,80}?([0-9]+\.[0-9]{4})",
+            "agg35": r"แผนเชิงรุก\s*35\D{0,80}?([0-9]+\.[0-9]{4})",
+            "agg65": r"แผนเชิงรุก\s*65\D{0,80}?([0-9]+\.[0-9]{4})",
+            "foreign": r"แผนหุ้นต่างประเทศ\D{0,80}?([0-9]+\.[0-9]{4})",
+        }
+
+        candidates = []
+        for i, date_match in enumerate(date_matches):
+            try:
+                nav_date = parse_be_date(date_match.group(1))
+            except ValueError:
+                continue
+
+            # Parse only the section associated with this date occurrence.
+            end = date_matches[i + 1].start() if i + 1 < len(date_matches) else min(
+                len(text), date_match.end() + 6000
+            )
+            section = text[date_match.end():end]
+            nav = {}
+            for key, pattern in patterns.items():
+                value_match = re.search(pattern, section)
+                if not value_match:
+                    break
+                nav[key] = float(value_match.group(1))
+
+            if len(nav) == 4 and all(v > 0 for v in nav.values()):
+                candidates.append((nav_date, date_match.group(1), nav))
+
+        if not candidates:
+            preserve_latest("Could not validate all four NAV values beside a publication date.")
+            return
+
+        nav_date, date_text, nav = max(candidates, key=lambda item: item[0])
+        age = (datetime.now().date() - nav_date).days
+        if age < 0 or age > MAX_AGE_DAYS:
+            preserve_latest(
+                f"Official page data date {date_text} is not recent enough ({age} days old)."
+            )
+            return
+
+        data = {
+            "date": f"{nav_date.day}/{nav_date.month}/{nav_date.year + 543}",
+            "nav_date_iso": nav_date.isoformat(),
+            "nav": nav,
+            "source": URL,
+            "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "verified": True,
+            "status": "official_page_parsed",
+            "status_message": "ดึงข้อมูล NAV จากหน้าเว็บไซต์ กบข. และตรวจสอบครบ 4 แผนแล้ว",
+        }
+        OUTPUT.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print("Validated official GPF NAV data:")
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+
+    except Exception as exc:
+        # Network, temporary maintenance, or unexpected HTML: keep latest known values.
+        preserve_latest(f"{type(exc).__name__}: {exc}")
 
 
 if __name__ == "__main__":

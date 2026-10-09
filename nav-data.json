@@ -10,7 +10,7 @@
   "note": "Starter data only; run Update GPF NAV workflow to attempt refresh.",
   "verified": false,
   "status": "fallback_latest_available",
-  "status_message": "ดึงข้อมูลจากหน้า กบข. ไม่สำเร็จ จึงใช้ NAV ที่บันทึกไว้เดิม",
-  "last_fetch_attempt": "2026-10-09T03:43:53+00:00",
-  "fetch_error": "Could not find any valid date in the official page text."
+  "status_message": "เว็บไซต์ กบข. ยังดึงข้อมูลไม่ได้ จึงใช้ NAV ที่บันทึกไว้เดิม วันที่ NAV ไม่ใช่วันที่ดึงข้อมูล",
+  "last_fetch_attempt": "2026-10-09T04:00:43+00:00",
+  "fetch_error": "Automatic parsing is paused until the official page format and NAV-date association can be verified. No NAV values were changed."
 }

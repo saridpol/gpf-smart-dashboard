@@ -1,169 +1,147 @@
-/* GPF Smart Dashboard NAV bridge
- * Loads public nav-data.json, feeds the existing dashboard's gpf-smart-nav cache,
- * and keeps the actual member account balance untouched.
+/* GPF Smart Dashboard NAV bridge.
+ * Place this file beside index.html in app/src/main/assets/.
+ * Reads nav-data.json from the repository; if the network is unavailable,
+ * keeps the saved NAV and clearly labels it as fallback data.
  */
-(() => {
+(function () {
   "use strict";
 
-  const URLS = [
-    "https://raw.githubusercontent.com/saridpol/gpf-smart-dashboard/main/nav-data.json",
-    "./nav-data.json"
-  ];
-  const KEYS = ["shariah", "agg35", "agg65", "foreign"];
-  const LABELS = {
-    shariah: "Shariah 100%",
-    agg35: "Aggressive 35",
-    agg65: "Aggressive 65",
-    foreign: "Foreign Equity"
+  var NAV_URL = "https://raw.githubusercontent.com/saridpol/gpf-smart-dashboard/main/nav-data.json";
+  var KEYS = ["shariah", "agg35", "agg65", "foreign"];
+  var MONTHS = {
+    "ม.ค.": 1, "มกราคม": 1, "ก.พ.": 2, "กุมภาพันธ์": 2,
+    "มี.ค.": 3, "มีนาคม": 3, "เม.ย.": 4, "เมษายน": 4,
+    "พ.ค.": 5, "พฤษภาคม": 5, "มิ.ย.": 6, "มิถุนายน": 6,
+    "ก.ค.": 7, "กรกฎาคม": 7, "ส.ค.": 8, "สิงหาคม": 8,
+    "ก.ย.": 9, "กันยายน": 9, "ต.ค.": 10, "ตุลาคม": 10,
+    "พ.ย.": 11, "พฤศจิกายน": 11, "ธ.ค.": 12, "ธันวาคม": 12
   };
 
-  const $ = (id) => document.getElementById(id);
+  function parseDate(value) {
+    if (!value) return null;
+    var s = String(value).trim();
+    var iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])).getTime();
 
-  function valid(data) {
-    return !!(
-      data &&
-      data.nav &&
-      KEYS.every(k => Number.isFinite(Number(data.nav[k])) && Number(data.nav[k]) > 0) &&
-      (data.date || data.nav_date_iso)
-    );
-  }
+    var numeric = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+    if (numeric) {
+      var y = Number(numeric[3]);
+      if (y >= 2400) y -= 543;
+      return new Date(y, Number(numeric[2]) - 1, Number(numeric[1])).getTime();
+    }
 
-  function normalize(data) {
-    return {
-      date: data.date || data.nav_date_iso,
-      shariah: Number(data.nav.shariah),
-      agg35: Number(data.nav.agg35),
-      agg65: Number(data.nav.agg65),
-      foreign: Number(data.nav.foreign),
-      _navStatus: data.status || (data.verified === true ? "official_page_parsed" : "fallback_latest_available"),
-      _navVerified: data.verified === true,
-      _navMessage: data.status_message || data.note || "",
-      _navFetchedAt: data.fetched_at || data.last_fetch_attempt || "",
-      _navDateIso: data.nav_date_iso || ""
-    };
-  }
-
-  function dateKey(data) {
-    if (data._navDateIso && /^\d{4}-\d{2}-\d{2}$/.test(data._navDateIso)) return data._navDateIso;
-    const m = String(data.date || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (!m) return "";
-    let year = Number(m[3]);
-    if (year >= 2400) year -= 543;
-    return `${year}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[1])).padStart(2, "0")}`;
-  }
-
-  function readCurrent() {
-    try {
-      const current = JSON.parse(localStorage.getItem("gpf-smart-nav") || "null");
-      if (current && KEYS.every(k => Number.isFinite(Number(current[k])) && Number(current[k]) > 0)) return current;
-    } catch (_) {}
+    var thai = s.match(/^(\d{1,2})\s+([ก-๙.]+)\s+(\d{4})$/);
+    if (thai && MONTHS[thai[2]]) {
+      var ty = Number(thai[3]);
+      if (ty >= 2400) ty -= 543;
+      return new Date(ty, MONTHS[thai[2]] - 1, Number(thai[1])).getTime();
+    }
     return null;
   }
 
-  function ensureStatusPanel() {
-    let panel = $("official-nav-status");
-    if (panel) return panel;
-
-    panel = document.createElement("div");
-    panel.id = "official-nav-status";
-    panel.style.cssText = "margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid #2c3b54;background:#141f33;color:#f5f7fb;font-size:13px;line-height:1.6";
-    panel.innerHTML =
-      '<strong style="display:block;margin-bottom:4px">สถานะข้อมูล NAV</strong>' +
-      '<div id="official-nav-status-text">กำลังตรวจสอบข้อมูล NAV…</div>' +
-      '<button id="official-nav-refresh" type="button" style="width:auto;margin-top:8px;padding:8px 12px;border-radius:9px;background:#263650;color:#e6eef9;border:1px solid #3b4d68">ตรวจสอบ NAV อีกครั้ง</button>';
-
-    const banner = document.querySelector(".banner");
-    if (banner && banner.parentNode) banner.insertAdjacentElement("afterend", panel);
-    else document.querySelector(".wrap")?.prepend(panel);
-
-    $("official-nav-refresh").addEventListener("click", () => refresh(true));
-    return panel;
+  function normalize(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    var sourceNav = payload.nav && typeof payload.nav === "object" ? payload.nav : payload;
+    var d = { date: payload.date || payload.nav_date_iso || "" };
+    KEYS.forEach(function (key) {
+      d[key] = Number(sourceNav[key]);
+      if (!Number.isFinite(d[key]) || d[key] <= 0) d = null;
+    });
+    if (!d || !d.date) return null;
+    d._verified = payload.verified === true;
+    d._status = payload.status || (d._verified ? "official_page_parsed" : "fallback_latest_available");
+    d._statusMessage = payload.status_message || "";
+    d._source = payload.source || NAV_URL;
+    return d;
   }
 
-  function setStatus(message, fallback) {
-    ensureStatusPanel();
-    const node = $("official-nav-status-text");
-    if (node) {
-      node.textContent = message;
-      node.style.color = fallback ? "#ffb454" : "#9df2c8";
+  function savedData() {
+    try {
+      var d = JSON.parse(localStorage.getItem("gpf-smart-nav") || "null");
+      if (!d) return null;
+      var n = normalize(d);
+      return n;
+    } catch (_) { return null; }
+  }
+
+  function visibleData(d, status, detail) {
+    // Keep metadata out of the existing calculations and form values.
+    var clean = { date: d.date };
+    KEYS.forEach(function (k) { clean[k] = d[k]; });
+    if (typeof window.render === "function") window.render(clean);
+
+    var header = document.getElementById("updated");
+    if (header) {
+      header.textContent = "วันที่ NAV: " + d.date + " • " + status;
+    }
+
+    var banner = document.querySelector(".banner");
+    var panel = document.getElementById("navAutoStatus");
+    if (!panel && banner) {
+      panel = document.createElement("div");
+      panel.id = "navAutoStatus";
+      panel.style.cssText = "margin:10px 0;padding:10px 12px;border:1px solid #3a4a63;border-radius:12px;background:#17243a;color:#dbe7f7;font-size:12px;line-height:1.6;overflow-wrap:anywhere";
+      banner.insertAdjacentElement("afterend", panel);
+    }
+    if (panel) {
+      panel.textContent = status + " — " + detail + " | แหล่งข้อมูล: nav-data.json";
+      panel.style.borderColor = d._verified ? "#277b5b" : "#a8752b";
+    }
+
+    var manualSection = Array.prototype.find.call(document.querySelectorAll(".section"), function (section) {
+      var h = section.querySelector("h2");
+      return h && h.textContent.indexOf("อัปเดต NAV ด้วยตนเอง") >= 0;
+    });
+    if (manualSection) {
+      var hint = manualSection.querySelector(".hint");
+      if (hint) hint.textContent = d._verified
+        ? "NAV อ่านจากไฟล์ข้อมูลที่ระบุว่าตรวจสอบแล้ว โปรดตรวจวันที่และแหล่งข้อมูลก่อนใช้อ้างอิง"
+        : "ขณะนี้ใช้ NAV สำรองที่บันทึกไว้ ไม่ใช่ข้อมูลสดจากเว็บไซต์ กบข. หากเว็บไซต์ปิดปรับปรุง ค่า NAV จะไม่เปลี่ยนจนกว่าจะมีข้อมูลใหม่ที่ตรวจสอบได้";
     }
   }
 
-  function displayData(data, sourceName) {
-    const date = data.date || data.nav_date_iso || "ไม่ระบุวันที่";
-    const verified = data._navVerified === true && data._navStatus === "official_page_parsed";
-    const state = verified
-      ? "อัปเดตจากข้อมูล NAV ที่อ่านได้จากหน้า กบข."
-      : "ใช้ NAV ล่าสุดที่บันทึกไว้ — ยังยืนยันไม่ได้ว่าเป็นข้อมูลปัจจุบัน";
-    const message = data._navMessage ? " · " + data._navMessage : "";
-    setStatus(`${state} · วันที่ NAV ${date} · แหล่งข้อมูล: ${sourceName}${message}`, !verified);
-
-    const updated = $("updated");
-    if (updated) {
-      updated.textContent = `NAV ตามข้อมูลที่บันทึก: ${date} · ${verified ? "ตรวจข้อมูลจากหน้า กบข. แล้ว" : "ข้อมูลสำรอง/ยังไม่ยืนยัน"}`;
-    }
-  }
-
-  function usePayload(payload, sourceName) {
-    const normalized = normalize(payload);
-    const current = readCurrent();
-    const currentKey = current ? dateKey(current) : "";
-    const incomingKey = dateKey(normalized);
-
-    // Never overwrite a newer dated local NAV with older remote data.
-    const chosen = current && currentKey && incomingKey && currentKey > incomingKey
-      ? current
-      : normalized;
-
-    localStorage.setItem("gpf-smart-nav", JSON.stringify(chosen));
-
-    // The existing index.html defines render(d) in its first script.
-    if (typeof render === "function") {
-      render(chosen);
+  function showSaved(reason) {
+    var local = savedData();
+    if (local) {
+      visibleData(local, "ใช้ข้อมูลที่บันทึกไว้", reason + " • ไม่ได้ยืนยันว่าเป็น NAV ล่าสุด");
     } else {
-      ["shariah", "agg35", "agg65", "foreign"].forEach(k => {
-        if ($(k)) $(k).value = Number(chosen[k]).toFixed(4);
-      });
-    }
-    displayData(chosen, sourceName);
-  }
-
-  async function refresh(manual) {
-    ensureStatusPanel();
-    setStatus(manual ? "กำลังตรวจสอบข้อมูลจากแหล่งเผยแพร่ NAV…" : "กำลังโหลด NAV ล่าสุด…", false);
-    let errorText = "ไม่สามารถโหลดข้อมูลได้";
-
-    for (const url of URLS) {
-      try {
-        const response = await fetch(url + (url.includes("?") ? "&" : "?") + "v=" + Date.now(), {
-          cache: "no-store",
-          headers: { "Accept": "application/json" }
-        });
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const payload = await response.json();
-        if (!valid(payload)) throw new Error("ข้อมูล NAV ไม่ครบ 4 แผนหรือไม่มีวันที่");
-        usePayload(payload, url.startsWith("http") ? "GitHub" : "ไฟล์ในเว็บ");
-        return;
-      } catch (e) {
-        errorText = e && e.message ? e.message : String(e);
-      }
-    }
-
-    // Network unavailable: keep last known NAV in the existing dashboard cache.
-    const current = readCurrent();
-    if (current) {
-      if (typeof render === "function") render(current);
-      displayData(current, "ข้อมูลสำรองในเครื่อง");
-      setStatus(`ดึงข้อมูลใหม่ไม่สำเร็จ (${errorText}) · คงข้อมูล NAV ที่บันทึกไว้วันที่ ${current.date || "ไม่ระบุ"} ห้ามถือว่าเป็น NAV ปัจจุบันจนกว่าจะตรวจสอบวันที่`, true);
-    } else {
-      setStatus(`ดึงข้อมูล NAV ไม่สำเร็จ (${errorText}) และไม่มีข้อมูลสำรองในเบราว์เซอร์ โปรดตรวจ nav-data.json`, true);
+      var panel = document.createElement("div");
+      panel.style.cssText = "margin:10px 0;padding:10px;border:1px solid #a8752b;border-radius:12px;background:#17243a;color:#ffe0a6;font-size:12px";
+      panel.textContent = "ยังเชื่อมต่อแหล่ง NAV อัตโนมัติไม่ได้ และไม่พบข้อมูลที่บันทึกไว้ในอุปกรณ์";
+      var banner = document.querySelector(".banner");
+      if (banner) banner.insertAdjacentElement("afterend", panel);
     }
   }
 
-  window.GPFNav = { refresh: () => refresh(true) };
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => refresh(false), { once: true });
-  } else {
-    refresh(false);
-  }
+  // Fetch latest published JSON. A successful fetch can still contain fallback
+  // data, so the verified flag is shown honestly rather than assumed true.
+  fetch(NAV_URL, { cache: "no-store" })
+    .then(function (response) {
+      if (!response.ok) throw new Error("ดาวน์โหลด nav-data.json ไม่สำเร็จ (HTTP " + response.status + ")");
+      return response.json();
+    })
+    .then(function (payload) {
+      var remote = normalize(payload);
+      if (!remote) throw new Error("รูปแบบ nav-data.json ไม่ถูกต้อง");
+
+      var local = savedData();
+      var localTime = local ? parseDate(local.date) : null;
+      var remoteTime = parseDate(remote.date);
+
+      // Never replace a newer manually saved NAV with an older remote record.
+      var chosen = (local && localTime && remoteTime && localTime > remoteTime) ? local : remote;
+      var clean = { date: chosen.date };
+      KEYS.forEach(function (k) { clean[k] = chosen[k]; });
+      localStorage.setItem("gpf-smart-nav", JSON.stringify(clean));
+
+      var status = chosen._verified ? "เชื่อมต่อข้อมูล NAV แล้ว" : "เชื่อมต่อได้ แต่ใช้ข้อมูลสำรอง";
+      var detail = chosen._verified
+        ? "ไฟล์ระบุว่าข้อมูลผ่านการตรวจสอบ โปรดตรวจวันที่ NAV"
+        : (chosen._statusMessage || "เว็บไซต์ กบข. ยังไม่ยืนยันข้อมูลใหม่; คงค่า NAV สำรองเดิม");
+      if (chosen === local) detail = "เก็บข้อมูลในอุปกรณ์ไว้ เพราะวันที่ใหม่กว่าข้อมูลจาก Repository";
+      visibleData(chosen, status, detail);
+    })
+    .catch(function (error) {
+      showSaved("ดึง nav-data.json ไม่สำเร็จ: " + (error && error.message ? error.message : "การเชื่อมต่อล้มเหลว"));
+    });
 })();

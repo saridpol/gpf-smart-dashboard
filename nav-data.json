@@ -7,5 +7,10 @@
     "foreign": 40.6887
   },
   "source": "https://www.gpf.or.th/thai2019/about/main.php?lang=th&menu=statistic&page=memberfund&pattern=n&size=n",
-  "note": "Starter data only; run Update GPF NAV workflow to attempt refresh."
+  "note": "Starter data only; run Update GPF NAV workflow to attempt refresh.",
+  "verified": false,
+  "status": "fallback_latest_available",
+  "status_message": "ดึง NAV ล่าสุดจากเว็บไซต์ไม่สำเร็จ ใช้ข้อมูลล่าสุดที่บันทึกไว้ โปรดตรวจสอบวันที่ข้อมูลก่อนนำไปตัดสินใจ",
+  "last_fetch_attempt": "2026-10-09T03:31:42+00:00",
+  "fetch_error": "Could not locate an official NAV date on the page."
 }

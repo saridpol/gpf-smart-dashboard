@@ -39,9 +39,12 @@ for key, pattern in patterns.items():
     if not match:
         raise SystemExit(f"Could not reliably locate {key} NAV; no data was changed.")
     nav[key] = float(match.group(1))
-
 day, month, year = date_match.group(1).split("/")
-date_th = f"{int(day)}/{int(month)}/{int(year) + 543}"
+year = int(year)
+year_be = year if year >= 2400 else year + 543
+date_th = f"{int(day)}/{int(month)}/{year_be}"
+date_iso = f"{year_be - 543:04d}-{int(month):02d}-{int(day):02d}"
+
 data = {
     "date": date_th,
     "nav": nav,

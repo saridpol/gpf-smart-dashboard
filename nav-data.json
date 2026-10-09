@@ -11,6 +11,6 @@
   "verified": false,
   "status": "fallback_latest_available",
   "status_message": "ดึงข้อมูลจากหน้า กบข. ไม่สำเร็จ จึงใช้ NAV ที่บันทึกไว้เดิม",
-  "last_fetch_attempt": "2026-10-09T03:36:26+00:00",
+  "last_fetch_attempt": "2026-10-09T03:40:34+00:00",
   "fetch_error": "Could not find any valid date in the official page text."
 }

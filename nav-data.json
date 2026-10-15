@@ -11,6 +11,6 @@
   "verified": false,
   "status": "fallback_latest_available",
   "status_message": "เว็บไซต์ กบข. ยังดึงข้อมูลไม่ได้ จึงใช้ NAV ที่บันทึกไว้เดิม วันที่ NAV ไม่ใช่วันที่ดึงข้อมูล",
-  "last_fetch_attempt": "2026-10-15T17:50:14+00:00",
+  "last_fetch_attempt": "2026-10-15T17:50:30+00:00",
   "fetch_error": "Automatic parsing is paused until the official page format and NAV-date association can be verified. No NAV values were changed."
 }
